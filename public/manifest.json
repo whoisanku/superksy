@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "SuperSky",
+  "version": "1.0.0",
+  "description": "A Chrome Extension built with React and TypeScript",
+  "permissions": ["storage", "tabs", "cookies", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "action": {},
+  "background": {
+    "service_worker": "src/background/background.tsx",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/content.tsx"],
+      "css": ["content.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
