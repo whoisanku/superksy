@@ -23,18 +23,23 @@ function Welcome() {
         password: appPassword,
       });
 
-      chrome.storage.local.set({ bskyHandle: handle, loggedIn: true }, () => {
-        console.log("Bluesky login successful. Handle stored.");
-        setIsLoggedIn(true);
+      chrome.storage.local.set(
+        { bskyHandle: handle, bskyAppPassword: appPassword, loggedIn: true },
+        () => {
+          console.log(
+            "Bluesky login successful. Handle and App Password stored."
+          );
+          setIsLoggedIn(true);
 
-        setTimeout(() => {
-          chrome.tabs.getCurrent((tab) => {
-            if (tab?.id) {
-              chrome.tabs.remove(tab.id);
-            }
-          });
-        }, 1500);
-      });
+          setTimeout(() => {
+            chrome.tabs.getCurrent((tab) => {
+              if (tab?.id) {
+                chrome.tabs.remove(tab.id);
+              }
+            });
+          }, 1500);
+        }
+      );
     } catch (err: any) {
       console.error("Bluesky login failed:", err);
       setError(

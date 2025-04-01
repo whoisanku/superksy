@@ -77,7 +77,7 @@ const styles: Record<string, CSSProperties> = {
   bubble: {
     width: "60px",
     height: "60px",
-    backgroundColor: "#ff4500",
+    backgroundColor: "transparent",
     color: "white",
     borderRadius: "50%",
     display: "flex",
@@ -90,6 +90,14 @@ const styles: Record<string, CSSProperties> = {
     boxShadow: "0 4px 15px rgba(0, 0, 0, 0.4)",
     border: "3px solid white",
     transition: "transform 0.2s ease-out",
+    position: "relative",
+    overflow: "hidden",
+  },
+  bubbleImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    borderRadius: "50%",
   },
   chatbox: {
     width: "300px",
@@ -171,10 +179,75 @@ const styles: Record<string, CSSProperties> = {
   },
   messagesContainer: {
     display: "flex",
-    flexDirection: "column" as const,
+    flexDirection: "column-reverse" as const,
     padding: "10px",
     flexGrow: 1,
     overflowY: "auto" as const,
+    scrollbarWidth: "thin",
+    scrollBehavior: "smooth" as const,
+  },
+  messageBadge: {
+    position: "absolute",
+    top: "0",
+    right: "0",
+    backgroundColor: "#0088ff",
+    color: "white",
+    borderRadius: "50%",
+    width: "22px",
+    height: "22px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "12px",
+    fontWeight: "bold",
+    border: "2px solid white",
+    boxShadow: "0 2px 5px rgba(0, 0, 0, 0.2)",
+    transform: "translate(30%, -30%)",
+    zIndex: 10,
+  },
+  conversationHeader: {
+    backgroundColor: "#f1f1f1",
+    padding: "10px 15px",
+    borderBottom: "1px solid #ddd",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  conversationTitleContainer: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+  },
+  conversationAvatar: {
+    width: "32px",
+    height: "32px",
+    borderRadius: "50%",
+    objectFit: "cover",
+  },
+  conversationTitle: {
+    fontWeight: "bold",
+    fontSize: "16px",
+    textOverflow: "ellipsis",
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+  },
+  conversationClose: {
+    background: "none",
+    border: "none",
+    fontSize: "18px",
+    cursor: "pointer",
+    padding: "0 5px",
+  },
+  timeAgo: {
+    fontSize: "11px",
+    color: "#777",
+    marginTop: "3px",
+  },
+  emptyState: {
+    padding: "20px",
+    textAlign: "center" as const,
+    color: "#666",
+    fontSize: "14px",
   },
 };
 
@@ -182,6 +255,40 @@ interface Message {
   text: string;
   isUser: boolean;
   id: number;
+}
+
+interface Conversation {
+  convo: {
+    id: string;
+    unreadCount: number;
+    updated: string;
+    participants: Array<{
+      did: string;
+      handle: string;
+      displayName?: string;
+    }>;
+    members?: Array<{
+      did: string;
+      handle: string;
+      displayName?: string;
+      avatar?: string;
+    }>;
+  };
+  messages: Array<{
+    id: string;
+    text: string;
+    createdAt: string;
+    authorDid: string;
+    sender: {
+      did: string;
+    };
+  }>;
+  latestMessage: {
+    id: string;
+    text: string;
+    createdAt: string;
+    authorDid: string;
+  };
 }
 
 const ContentBubble: React.FC = () => {
@@ -201,10 +308,16 @@ const ContentBubble: React.FC = () => {
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadConversations, setUnreadConversations] = useState<
+    Conversation[]
+  >([]);
+  const [activeConversation, setActiveConversation] =
+    useState<Conversation | null>(null);
   const [inputText, setInputText] = useState("");
-  const [messages, setMessages] = useState<Message[]>([
-    { text: "Hi there! How can I help you today?", isUser: false, id: 1 },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [senderAvatar, setSenderAvatar] = useState<string>("");
+  const [senderName, setSenderName] = useState<string>("");
 
   // Calculate chatbox position to keep it within viewport
   const getChatboxPosition = () => {
@@ -243,270 +356,469 @@ const ContentBubble: React.FC = () => {
     return positionStyle;
   };
 
-  // Inject backup styles on mount
+  // Fetch unread conversations
+  const fetchUnreadConversations = () => {
+    chrome.runtime.sendMessage(
+      { type: "REQUEST_UNREAD_CONVERSATIONS" },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          console.error(
+            "Error requesting unread conversations:",
+            chrome.runtime.lastError
+          );
+          return;
+        }
+
+        if (response && Array.isArray(response.conversations)) {
+          console.log("Got unread conversations:", response.conversations);
+          setUnreadConversations(response.conversations);
+
+          // Get the first conversation's sender info
+          if (response.conversations.length > 0) {
+            const conversation = response.conversations[0];
+            const sender = conversation.convo.members?.find(
+              (member: { did: string }) =>
+                member.did === conversation.messages[0]?.sender.did
+            );
+
+            if (sender) {
+              setSenderAvatar(sender.avatar || "");
+              setSenderName(
+                sender.displayName || sender.handle || "Unknown User"
+              );
+            }
+          }
+        } else {
+          console.warn(
+            "Received invalid unread conversations response:",
+            response
+          );
+          setUnreadConversations([]);
+        }
+      }
+    );
+  };
+
+  // Open a specific conversation
+  const openConversation = (conversation: Conversation) => {
+    setActiveConversation(conversation);
+
+    // Update sender info
+    const sender = conversation.convo.members?.find(
+      (member: { did: string }) =>
+        member.did === conversation.messages[0]?.sender.did
+    );
+
+    if (sender) {
+      setSenderAvatar(sender.avatar || "");
+      setSenderName(sender.displayName || sender.handle || "Unknown User");
+    }
+
+    // Ensure we have messages to display
+    if (!conversation.messages || conversation.messages.length === 0) {
+      setMessages([
+        { text: "No messages in this conversation yet", isUser: false, id: 1 },
+      ]);
+      setIsOpen(true);
+      return;
+    }
+
+    // Convert the conversation messages to our Message format
+    const conversationMessages = conversation.messages.map((msg, index) => ({
+      text: msg.text || "Empty message",
+      isUser: false,
+      id: index + 1,
+    }));
+
+    // Get current user's DID from the first participant that isn't in the conversation messages
+    const userDidPromise = new Promise<string>((resolve) => {
+      chrome.storage.local.get(["bskyHandle", "bskyAppPassword"], (result) => {
+        if (result.bskyHandle) {
+          console.log("Current user handle:", result.bskyHandle);
+          const userParticipant = conversation.convo.participants?.find(
+            (p) => p.handle === result.bskyHandle
+          );
+          resolve(userParticipant?.did || "");
+        } else {
+          resolve("");
+        }
+      });
+    });
+
+    userDidPromise.then((userDid) => {
+      console.log("Current user DID:", userDid);
+
+      const updatedMessages = conversationMessages.map((msg, index) => {
+        if (index < conversation.messages.length) {
+          const originalMsg = conversation.messages[index];
+          return {
+            ...msg,
+            isUser: originalMsg.authorDid === userDid,
+          };
+        }
+        return msg;
+      });
+
+      setMessages(updatedMessages);
+      setIsOpen(true);
+
+      // Focus the chat input and scroll to show latest messages
+      setTimeout(() => {
+        if (chatInputRef.current) {
+          chatInputRef.current.focus();
+        }
+        if (messagesEndRef.current) {
+          messagesEndRef.current.parentElement?.scrollTo({
+            top: 0,
+            behavior: "smooth",
+          });
+        }
+      }, 100);
+    });
+  };
+
+  // Send a message to the active conversation
+  const sendMessage = () => {
+    if (!inputText.trim() || !activeConversation) return;
+
+    const newMessage: Message = {
+      text: inputText,
+      isUser: true,
+      id: messages.length + 1,
+    };
+
+    setMessages([...messages, newMessage]);
+    setInputText("");
+
+    // Scroll to show latest messages
+    setTimeout(() => {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.parentElement?.scrollTo({
+          top: 0,
+          behavior: "smooth",
+        });
+      }
+    }, 100);
+
+    // Send the message through the background script
+    chrome.runtime.sendMessage(
+      {
+        type: "SEND_MESSAGE",
+        convoId: activeConversation.convo.id,
+        text: inputText,
+      },
+      (response) => {
+        if (chrome.runtime.lastError || !response.success) {
+          console.error(
+            "Error sending message:",
+            chrome.runtime.lastError || response.error
+          );
+          // Could add failure UI feedback here
+          return;
+        }
+
+        console.log("Message sent successfully:", response);
+
+        // Reload conversations to get the latest state
+        fetchUnreadConversations();
+      }
+    );
+  };
+
+  // Effect to inject backup styles
   useEffect(() => {
     injectStyles();
   }, []);
 
-  // Auto-scroll to bottom when messages change
+  // Effect to fetch unread message count
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    console.log("Setting up unread message count checker");
 
-  // Focus on input when chat opens
-  useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => {
-        chatInputRef.current?.focus();
-      }, 100);
-    }
-  }, [isOpen]);
-
-  // Handle window resize
-  useEffect(() => {
-    console.log("ContentBubble mounted");
-
-    const handleResize = () => {
-      setPosition((current) => {
-        return {
-          x: Math.min(current.x, window.innerWidth - 80),
-          y: Math.min(current.y, window.innerHeight - 80),
-        };
-      });
-    };
-
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    // Only allow dragging on the bubble itself or header, not the chatbox content
-    if (
-      e.target === bubbleRef.current ||
-      (bubbleRef.current?.contains(e.target as Node) && !isOpen) ||
-      e.currentTarget
-        .querySelector(".supersky-chatbox-header")
-        ?.contains(e.target as Node)
-    ) {
-      setIsDragging(true);
-      setHasMoved(false);
-      mouseDownTime.current = Date.now();
-      dragStartPos.current = {
-        x: e.clientX - position.x,
-        y: e.clientY - position.y,
-      };
-      e.preventDefault();
-    }
-  };
-
-  const handleMouseMove = (e: MouseEvent) => {
-    if (!isDragging) return;
-
-    // Set hasMoved flag if cursor moves more than a small threshold
-    if (!hasMoved) {
-      const moveX = Math.abs(e.clientX - dragStartPos.current.x - position.x);
-      const moveY = Math.abs(e.clientY - dragStartPos.current.y - position.y);
-      if (moveX > 5 || moveY > 5) {
-        setHasMoved(true);
-      }
-    }
-
-    let newX = e.clientX - dragStartPos.current.x;
-    let newY = e.clientY - dragStartPos.current.y;
-
-    // Boundary checks
-    const bubbleWidth = bubbleRef.current?.offsetWidth || 60;
-    const bubbleHeight = bubbleRef.current?.offsetHeight || 60;
-    newX = Math.max(0, Math.min(newX, window.innerWidth - bubbleWidth));
-    newY = Math.max(0, Math.min(newY, window.innerHeight - bubbleHeight));
-
-    setPosition({ x: newX, y: newY });
-  };
-
-  const handleMouseUp = (e: MouseEvent) => {
-    if (isDragging) {
-      const dragDuration = Date.now() - mouseDownTime.current;
-
-      // Only treat as click if:
-      // 1. Mouse hasn't moved significantly (hasMoved is false)
-      // 2. The interaction was short (less than 200ms)
-      if (!hasMoved && dragDuration < 200) {
-        const target = e.target as Node;
-
-        // Don't toggle on buttons or textarea
-        if (
-          !(target instanceof HTMLButtonElement) &&
-          !(target instanceof HTMLTextAreaElement)
-        ) {
-          // Toggle only if clicked on bubble when closed, or on header when open
-          if (
-            !isOpen ||
-            (bubbleRef.current?.contains(target) &&
-              document
-                .querySelector(".supersky-chatbox-header")
-                ?.contains(target))
-          ) {
-            setIsOpen(!isOpen);
-            console.log(
-              "Treating mouseup as click, chat is now:",
-              !isOpen ? "open" : "closed"
+    // Function to request unread count from background script
+    const checkUnreadCount = () => {
+      chrome.runtime.sendMessage(
+        { type: "REQUEST_UNREAD_COUNT" },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "Error requesting unread count:",
+              chrome.runtime.lastError
             );
+            return;
+          }
+
+          if (response && typeof response.unreadCount === "number") {
+            console.log("Got unread count:", response.unreadCount);
+            setUnreadCount(response.unreadCount);
+
+            // If we have unread messages, also fetch the conversations
+            if (response.unreadCount > 0) {
+              fetchUnreadConversations();
+            }
+          } else {
+            console.warn("Received invalid unread count response:", response);
           }
         }
-      }
-
-      setIsDragging(false);
-      setHasMoved(false);
-    }
-  };
-
-  // We're replacing onClick with our own mouse down/up handling
-  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    // Prevent default click handling - we'll handle it in mouseup
-    e.stopPropagation();
-  };
-
-  const handleSendMessage = () => {
-    if (!inputText.trim()) return;
-
-    // Add user message
-    const newMessage: Message = {
-      text: inputText,
-      isUser: true,
-      id: Date.now(),
+      );
     };
 
-    setMessages((prev) => [...prev, newMessage]);
-    setInputText("");
+    // Check immediately on mount
+    checkUnreadCount();
 
-    // Simulate bot response after a delay
-    setTimeout(() => {
-      const botResponse: Message = {
-        text: `Thanks for your message: "${inputText}".\nThis is a sample response.`,
-        isUser: false,
-        id: Date.now(),
-      };
-      setMessages((prev) => [...prev, botResponse]);
-    }, 1000);
+    // Set up interval to check very frequently (every 2 seconds)
+    const intervalId = setInterval(checkUnreadCount, 2000);
+
+    // Force a check for unread messages more aggressively
+    const forceCheckMessages = () => {
+      chrome.runtime.sendMessage(
+        { type: "FORCE_CHECK_MESSAGES" },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "Error forcing message check:",
+              chrome.runtime.lastError
+            );
+          } else {
+            console.log("Forced message check result:", response);
+            // After forced check, immediately get the count
+            checkUnreadCount();
+          }
+        }
+      );
+    };
+
+    // Force check every 10 seconds for more real-time updates
+    const forceCheckIntervalId = setInterval(forceCheckMessages, 10000);
+
+    // Also check when the tab becomes visible again
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        console.log("Tab became visible, checking messages");
+        forceCheckMessages();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    // Clean up on unmount
+    return () => {
+      clearInterval(intervalId);
+      clearInterval(forceCheckIntervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
+  // Handle mouse down event for dragging
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (isOpen) return; // Don't allow dragging when chat is open
+
+    e.preventDefault();
+    setIsDragging(true);
+    mouseDownTime.current = Date.now();
+    dragStartPos.current = { x: e.clientX, y: e.clientY };
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
+  // Handle mouse move event for dragging
+  const handleMouseMove = (e: React.MouseEvent<Document>) => {
+    if (!isDragging) return;
+
+    const deltaX = e.clientX - dragStartPos.current.x;
+    const deltaY = e.clientY - dragStartPos.current.y;
+
+    // Only set hasMoved if we've moved a significant amount
+    if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
+      setHasMoved(true);
     }
+
+    setPosition({
+      x: Math.min(Math.max(30, position.x + deltaX), window.innerWidth - 30),
+      y: Math.min(Math.max(30, position.y + deltaY), window.innerHeight - 30),
+    });
+
+    dragStartPos.current = { x: e.clientX, y: e.clientY };
   };
 
+  // Handle mouse up event for dragging
+  const handleMouseUp = () => {
+    setIsDragging(false);
+
+    // If it was a short click and we haven't moved, treat it as a click
+    if (!hasMoved && Date.now() - mouseDownTime.current < 200) {
+      handleClick();
+    }
+
+    setHasMoved(false);
+  };
+
+  // Scroll to bottom when new messages are added
   useEffect(() => {
-    if (isDragging) {
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-    } else {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
+    if (messagesEndRef.current && isOpen) {
+      // For reversed flex direction, we scroll to top to see latest messages
+      messagesEndRef.current.parentElement?.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
     }
+  }, [messages, isOpen]);
+
+  // Handle click on the bubble
+  const handleClick = () => {
+    // If there's an active conversation already or we have unread conversations
+    if (activeConversation) {
+      setIsOpen(!isOpen);
+    } else if (unreadConversations.length > 0) {
+      // Open the first unread conversation
+      openConversation(unreadConversations[0]);
+    } else {
+      // Just toggle the default chat interface
+      setIsOpen(!isOpen);
+
+      // Reset messages if we don't have an active conversation
+      if (!isOpen && messages.length === 0) {
+        setMessages([
+          { text: "Hi there! How can I help you today?", isUser: false, id: 1 },
+        ]);
+      }
+    }
+  };
+
+  // Handle window resize
+  const handleResize = () => {
+    setPosition((prevPos) => ({
+      x: Math.min(prevPos.x, window.innerWidth - 30),
+      y: Math.min(prevPos.y, window.innerHeight - 30),
+    }));
+  };
+
+  // Set up event listeners for drag and resize
+  useEffect(() => {
+    document.addEventListener("mousemove", handleMouseMove as any);
+    document.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("resize", handleResize);
 
     return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mousemove", handleMouseMove as any);
       document.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("resize", handleResize);
     };
-  }, [isDragging, hasMoved, isOpen]);
+  }, [isDragging, position]);
 
-  // Get dynamic chatbox positioning styles
-  const chatboxPosition = getChatboxPosition();
+  // Handle input change for the chat
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputText(e.target.value);
+  };
+
+  // Handle key press for sending messages with Enter
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  // Provide a way to go back to the conversation list
+  const closeConversation = () => {
+    setActiveConversation(null);
+    setIsOpen(false);
+  };
 
   return (
     <div
-      ref={bubbleRef}
       id="supersky-bubble-container"
       style={{
         position: "fixed",
-        left: `${position.x}px`,
         top: `${position.y}px`,
+        left: `${position.x}px`,
         zIndex: 2147483647,
-        cursor: isDragging ? "grabbing" : "grab",
-        transition: isDragging
-          ? "none"
-          : "left 0.1s ease-out, top 0.1s ease-out",
-        fontFamily: "system-ui, -apple-system, sans-serif",
-        fontSize: "14px",
-        lineHeight: 1.5,
       }}
-      onMouseDown={handleMouseDown}
-      onClick={handleClick}
     >
-      {/* The Bubble itself */}
-      {!isOpen && (
-        <div className="supersky-bubble" style={styles.bubble}>
-          S
+      {/* Chat Bubble */}
+      <div
+        ref={bubbleRef}
+        className="supersky-bubble"
+        style={{
+          ...styles.bubble,
+          position: "relative", // Ensure position is relative for badge positioning
+        }}
+        onMouseDown={handleMouseDown}
+      >
+        {senderAvatar ? (
+          <img src={senderAvatar} alt="Profile" style={styles.bubbleImage} />
+        ) : (
+          <span style={{ zIndex: 0 }}>S</span>
+        )}
+      </div>
+
+      {/* Separate badge container for better positioning */}
+      {unreadCount > 0 && (
+        <div
+          style={{
+            ...styles.messageBadge,
+            position: "absolute",
+            top: "0",
+            right: "0",
+          }}
+        >
+          {unreadCount > 99 ? "99+" : unreadCount}
         </div>
       )}
 
-      {/* The Chatbox (visible when open) */}
+      {/* Chat Box */}
       {isOpen && (
         <div
           ref={chatboxRef}
           className="supersky-chatbox"
-          style={{ ...styles.chatbox, ...chatboxPosition }}
+          style={{
+            ...styles.chatbox,
+            ...getChatboxPosition(),
+            opacity: 1,
+            transform: "scale(1)",
+          }}
         >
-          <div
-            className="supersky-chatbox-header"
-            style={styles.chatboxHeader}
-            onMouseDown={handleMouseDown} // Allow dragging from header
-          >
-            <span>SuperSky Chat</span>
+          <div style={styles.conversationHeader}>
+            <div style={styles.conversationTitleContainer}>
+              {senderAvatar && (
+                <img
+                  src={senderAvatar}
+                  alt="Profile"
+                  style={styles.conversationAvatar}
+                />
+              )}
+              <div style={styles.conversationTitle}>{senderName}</div>
+            </div>
             <button
-              style={styles.closeButton}
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsOpen(false);
-              }}
+              style={styles.conversationClose}
+              onClick={closeConversation}
             >
-              X
+              ×
             </button>
           </div>
 
-          <div
-            className="supersky-chatbox-content"
-            style={styles.chatboxContent}
-            onClick={(e) => e.stopPropagation()} // Prevent clicks in content from closing
-          >
-            <div style={styles.messagesContainer}>
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  style={{
-                    ...styles.chatMessage,
-                    ...(msg.isUser ? styles.userMessage : styles.botMessage),
-                  }}
-                >
-                  {msg.text}
-                </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
+          <div style={styles.messagesContainer}>
+            {messages.map((msg) => (
+              <div
+                key={msg.id}
+                style={{
+                  ...styles.chatMessage,
+                  ...(msg.isUser ? styles.userMessage : styles.botMessage),
+                }}
+              >
+                {msg.text}
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
           </div>
 
-          <div
-            className="supersky-chatbox-footer"
-            style={styles.chatboxFooter}
-            onClick={(e) => e.stopPropagation()} // Prevent clicks in footer from closing
-          >
+          <div style={styles.chatboxFooter}>
             <textarea
               ref={chatInputRef}
-              className="supersky-chat-input"
               style={styles.chatInput}
+              placeholder="Type a message..."
               value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Type your message..."
-              rows={2}
+              onChange={handleInputChange}
+              onKeyPress={handleKeyPress}
             />
-            <button
-              className="supersky-send-button"
-              style={styles.sendButton}
-              onClick={handleSendMessage}
-            >
+            <button style={styles.sendButton} onClick={sendMessage}>
               Send
             </button>
           </div>
