@@ -1,32 +1,47 @@
 import { useState } from "react";
+import { AtpAgent } from "@atproto/api";
 
 function Welcome() {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [handle, setHandle] = useState("");
+  const [appPassword, setAppPassword] = useState("");
   const [error, setError] = useState("");
-  const [isLoggedIn, setIsLoggedIn] = useState(false); // State to show success message
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  const handleLogin = () => {
-    setError(""); // Clear previous errors
-    // --- Dummy Login Check ---
-    if (username === "user" && password === "password") {
-      // Simulate successful login by storing a dummy token
-      chrome.storage.local.set({ authToken: "dummy-token" }, () => {
-        console.log("Auth token stored.");
+  const handleLogin = async () => {
+    setError("");
+
+    if (!handle || !appPassword) {
+      setError("Please enter both your handle and app password.");
+      return;
+    }
+
+    try {
+      const agent = new AtpAgent({ service: "https://bsky.social" });
+
+      await agent.login({
+        identifier: handle,
+        password: appPassword,
+      });
+
+      chrome.storage.local.set({ bskyHandle: handle, loggedIn: true }, () => {
+        console.log("Bluesky login successful. Handle stored.");
         setIsLoggedIn(true);
-        // Optional: Close the welcome tab after a short delay
+
         setTimeout(() => {
           chrome.tabs.getCurrent((tab) => {
             if (tab?.id) {
               chrome.tabs.remove(tab.id);
             }
           });
-        }, 1500); // Close after 1.5 seconds
+        }, 1500);
       });
-    } else {
-      setError("Invalid username or password.");
+    } catch (err: any) {
+      console.error("Bluesky login failed:", err);
+      setError(
+        err.message ||
+          "Login failed. Check your handle and app password (ensure it has DM/Chat access if needed later)."
+      );
     }
-    // --- End Dummy Login Check ---
   };
 
   if (isLoggedIn) {
@@ -41,28 +56,30 @@ function Welcome() {
   return (
     <div>
       <h1>Welcome to SuperSky!</h1>
-      <p>Please log in to continue.</p>
+      <p>Please log in with your Bluesky account.</p>
       <div>
-        <label htmlFor="username">Username:</label>
+        <label htmlFor="handle">Bluesky Handle:</label>
         <input
           type="text"
-          id="username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
+          id="handle"
+          value={handle}
+          placeholder="yourhandle.bsky.social"
+          onChange={(e) => setHandle(e.target.value)}
         />
       </div>
       <div style={{ marginTop: "10px" }}>
-        <label htmlFor="password">Password:</label>
+        <label htmlFor="appPassword">App Password:</label>
         <input
           type="password"
-          id="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          id="appPassword"
+          value={appPassword}
+          placeholder="xxxx-xxxx-xxxx-xxxx"
+          onChange={(e) => setAppPassword(e.target.value)}
         />
       </div>
       {error && <p style={{ color: "red" }}>{error}</p>}
       <button onClick={handleLogin} style={{ marginTop: "15px" }}>
-        Login
+        Login with Bluesky
       </button>
     </div>
   );
