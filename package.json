@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@atproto/api": "^0.14.16",
+    "date-fns": "^4.1.0",
     "path": "^0.12.7",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

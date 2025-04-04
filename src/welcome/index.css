@@ -1,5 +1,22 @@
+@import url("https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* Add any specific styles for the welcome page here */
 body {
-  font-family: sans-serif;
-  padding: 1em;
+  margin: 0;
+  padding: 0;
+  font-family: "Nunito", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Add Nunito font to Tailwind */
+@layer base {
+  html {
+    font-family: "Nunito", sans-serif;
+  }
 }
